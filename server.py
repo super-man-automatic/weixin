@@ -12,8 +12,8 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 
 # 替换为你的小程序的 AppID 和 AppSecret
-APP_ID = "wx39a70f358eabe973"
-APP_SECRET = "a7630e787cab06723812fba0b11fe7d2"
+APP_ID = ""
+APP_SECRET = ""
 
 # 配置 MySQL 数据库连接
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:123456@localhost:3306/ai_chat'
