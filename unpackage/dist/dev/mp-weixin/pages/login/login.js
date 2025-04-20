@@ -29,7 +29,7 @@ const _sfc_main = {
           success: (res) => {
             if (res.code) {
               common_vendor.wx$1.request({
-                url: "http://172.26.98.86:5000/login",
+                url: "http://172.26.97.248:5000/login",
                 // 替换为你的后端地址
                 method: "POST",
                 data: {

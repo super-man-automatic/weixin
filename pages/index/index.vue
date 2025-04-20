@@ -42,8 +42,10 @@ export default {
     return {
       dialogs: [], // 对话记录
       inputValue: '', // 输入框内容
-      apiUrl: 'http://localhost:11434', // Ollama 本地 API 地址
+      apiServerUrl: 'http://localhost:11434', // API 调用服务器地址
+      dbServerUrl: 'http://172.26.97.248:5000', // 数据库写入服务器地址
       scrollToBottomID: 'dialog-bottom', // 滚动到底部的 ID
+      openid: '', // 当前用户的 openid
       socketOpen: false // API 连接状态
     };
   },
@@ -56,7 +58,7 @@ export default {
     // 检查 API 连接状态
     checkAPIConnection() {
       wx.request({
-        url: `${this.apiUrl}/api/tags`,
+        url: `${this.apiServerUrl}/api/tags`, // 使用 API 调用服务器
         method: 'GET',
         success: () => {
           this.socketOpen = true;
@@ -70,8 +72,15 @@ export default {
     },
 
     // 发送问题
-    sendQuestion() {
+    async sendQuestion() {
       if (!this.inputValue.trim() || !this.socketOpen) return;
+
+      // 检查 openid 是否存在
+      if (!this.openid) {
+        console.error('缺少 openid，请重新登录');
+        wx.redirectTo({ url: '/pages/login/login' }); // 如果没有 openid，跳转到登录页面
+        return;
+      }
 
       // 添加用户消息到对话记录
       this.dialogs.push({
@@ -83,56 +92,81 @@ export default {
       this.inputValue = ''; // 清空输入框
       this.scrollToBottom(); // 滚动到底部
 
-      const requestData = {
-        model: 'deepseek-r1:8b',
-        prompt: question,
-        max_tokens: 1024,
-        temperature: 0.7,
-        top_p: 1.0,
-        stream: false
-      };
-
-      // 调用 API
-      wx.request({
-        url: `${this.apiUrl}/api/generate`,
-        method: 'POST',
-        header: {
-          'Content-Type': 'application/json'
-        },
-        data: JSON.stringify(requestData),
-        success: (res) => {
-          this.handleAPIResponse(res.data);
-        },
-        fail: (err) => {
-          console.error('请求失败:', err);
-          this.addToDialog('AI', '请求处理失败，请重试');
-        }
-      });
-    },
-
-    // 处理 API 响应
-    handleAPIResponse(response) {
       try {
-        let aiResponse = '';
-
-        if (response?.response) {
-          aiResponse = response.response.trim();
-        } else {
-          aiResponse = '未能获取到有效回答';
-        }
-
-        this.dialogs.push({ role: 'ai', content: aiResponse });
-        this.scrollToBottom(); // 滚动到底部
-      } catch (error) {
-        console.error('解析响应失败:', error);
-        this.addToDialog('AI', '解析响应失败');
+        wx.request({
+          url: `${this.apiServerUrl}/api/generate`, // 使用 API 调用服务器
+          method: 'POST',
+          header: {
+            'Content-Type': 'application/json'
+          },
+          data: {
+            prompt: question,
+            model: 'deepseek-r1:8b',
+            max_tokens: 1024,
+            temperature: 0.7,
+            top_p: 1.0,
+            stream: false
+          },
+          success: (res) => {
+            if (res.statusCode === 200 && res.data.response) {
+              // 去掉 <think></think> 字符
+              const aiResponse = res.data.response.replace(/<think>.*?<\/think>/g, '').trim();
+              this.dialogs.push({ role: 'ai', content: aiResponse });
+              this.scrollToBottom(); // 滚动到底部
+              this.saveChatHistory(question, aiResponse); // 保存聊天记录
+            } else {
+              console.error('请求失败:', res.data);
+              this.dialogs.push({ role: 'ai', content: '请求处理失败，请重试' });
+              this.scrollToBottom();
+            }
+          },
+          fail: (err) => {
+            console.error('请求失败:', err);
+            this.dialogs.push({ role: 'ai', content: '请求处理失败，请重试' });
+            this.scrollToBottom();
+          }
+        });
+      } catch (err) {
+        console.error('请求失败:', err);
+        this.dialogs.push({ role: 'ai', content: '请求处理失败，请重试' });
+        this.scrollToBottom();
       }
     },
 
-    // 添加对话记录
-    addToDialog(role, content) {
-      this.dialogs.push({ role, content });
-      this.scrollToBottom();
+    // 保存聊天记录
+    async saveChatHistory(question, answer) {
+      try {
+        if (!this.openid) {
+          console.error('缺少 openid，请重新登录');
+          wx.redirectTo({ url: '/pages/login/login' }); // 如果没有 openid，跳转到登录页面
+          return;
+        }
+
+        // 去掉 <think></think> 字符
+        const sanitizedQuestion = question.replace(/<think>.*?<\/think>/g, '').trim();
+        const sanitizedAnswer = answer.replace(/<think>.*?<\/think>/g, '').trim();
+
+        wx.request({
+          url: `${this.dbServerUrl}/save_chat`, // 使用数据库写入服务器
+          method: 'POST',
+          header: {
+            'Content-Type': 'application/json'
+          },
+          data: {
+            openid: this.openid, // 使用当前用户的 openid
+            question: sanitizedQuestion,
+            answer: sanitizedAnswer
+          },
+          success: (res) => {
+            console.log('聊天记录保存成功:', res.data);
+          },
+          fail: (err) => {
+            console.error('保存聊天记录失败:', err);
+          }
+        });
+      } catch (err) {
+        console.error('保存聊天记录时发生错误:', err);
+      }
     },
 
     // 滚动到底部
@@ -144,6 +178,16 @@ export default {
   },
   onLoad() {
     this.checkAPIConnection(); // 检查 API 连接状态
+
+    // 从本地存储中获取 openid
+    const openid = wx.getStorageSync('openid');
+    if (!openid) {
+      console.error('缺少 openid，请重新登录');
+      wx.redirectTo({ url: '/pages/login/login' }); // 如果没有 openid，跳转到登录页面
+    } else {
+      this.openid = openid; // 保存 openid 到组件数据中
+      console.log('当前用户 openid:', openid);
+    }
   }
 };
 </script>

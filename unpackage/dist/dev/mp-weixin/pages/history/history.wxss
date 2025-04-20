@@ -44,3 +44,15 @@
   padding-left: 40rpx;
   border-left: 4rpx solid #007aff;
 }
+.loading.data-v-b2d018fa {
+  text-align: center;
+  font-size: 24rpx;
+  color: #666;
+  padding: 20rpx 0;
+}
+.no-more.data-v-b2d018fa {
+  text-align: center;
+  font-size: 24rpx;
+  color: #aaa;
+  padding: 20rpx 0;
+}

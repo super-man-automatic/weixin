@@ -51,7 +51,7 @@ export default {
           success: (res) => {
             if (res.code) {
               wx.request({
-                url: 'http://172.26.98.86:5000/login', // 替换为你的后端地址
+                url: 'http://172.26.97.248:5000/login', // 替换为你的后端地址
                 method: 'POST',
                 data: {
                   code: res.code
