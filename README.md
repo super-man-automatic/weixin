@@ -13,7 +13,7 @@
 &emsp; 然后在小程序工具上登陆该账户，不然就是游客登录，应该会少权限。
 ## 5. 创建一个后端服务器server.py
 &emsp; 使用了python脚本编写一个服务器。这里使用到的库有Flask，PyMySQL，Requests,Datetime等，需要先自行安装好，运行该文件即可创建一个本地的服务器。<br />
-&emsp; 用户登陆小程序获取到 code 后，通过调用微信提供的接口 https://api.weixin.qq.com/sns/jscode2session，将 code 发送到微信服务器，根据你给的APPID和APPSECRET，微信服务器会返回用户的 openid 和 session_key，服务器获取其openid，用户得以登录。<br />
+&emsp; 用户登陆小程序获取到 code 后，通过调用微信提供的接口 https://api.weixin.qq.com/sns/jscode2session，将 code 发送到微信服务器，根据你给的APPID和APPSECRET，是的，**你需要在代码里面补充你的APPID和APPSECRET**，微信服务器会返回用户的 openid 和 session_key，服务器获取其openid，用户得以登录。<br />
 &emsp; 如果用户是初次登陆，后端服务器会将收取到的openid记录在数据库ai_chat的User表格里面，若不是初次登录，则不用进行登记。<br />
 &emsp; 用户在index页面进行与AI的问答时，问题和答案、用户的openid以及提问的时间会通过后端服务器记录在数据库ai_chat的chat_history表格里面。<br />
 &emsp; 用户在查看会话历史时，后端服务器负责从数据库的chat_history表格里面选取openid等于当前用户的openid的内容，在history里面进行展示。<br />
