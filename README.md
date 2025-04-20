@@ -9,15 +9,15 @@ uni-app是一个使用 Vue.js 开发所有前端应用的框架，开发者编�
 uni-app使用的IDE是HBuilder X，可以支持跨平台的编译运行。此次借助它运行到微信小程序模拟器。
 ## 4. 微信小程序
 这是一个小程序开发项目，而且uni-app的运行要直接依赖于该工具的手机模拟器，所以要先下载好微信小程序工具。<br />
-不仅如此还要在微信的小程序平台上面注册小程序账号，补充好小程序的各项信息，注意要记好APPID以及APPSECRET <br />
-然后在小程序工具上登陆该账户，
-## 5. 创建一个后台服务器
+不仅如此还要在微信的小程序平台上面注册小程序账号，补充好小程序的各项信息，注意要记好APPID以及APPSECRET。 <br />
+然后在小程序工具上登陆该账户，不然就是游客登录，应该会少权限。
+## 5. 创建一个后端服务器server.py
 使用了python脚本编写一个服务器。这里使用到的库有Flask，PyMySQL，Requests,Datetime等，需要先自行安装好，运行该文件即可创建一个本地的服务器。<br />
-用户登陆小程序获取到 code 后，通过调用微信提供的接口 https://api.weixin.qq.com/sns/jscode2session，将 code 发送到微信服务器，微信服务器会返回用户的 openid 和 session_key。<br />
-如果用户是初次登陆，后台服务器会将收取到的openid记录在数据库ai_chat的User表格里面，若不是初次登录，则不用进行登记。<br />
-用户在index页面进行与AI的问答时，问题和答案、用户的openid以及提问的时间会通过后台服务器记录在数据库ai_chat的chat_history表格里面。<br />
-用户在查看会话历史时，后台服务器负责从数据库的chat_history表格里面选取openid等于当前用户的openid的内容，在history里面进行展示。
-## 6. 新建一个uni-app项目
-这里我使用的是最基本的vue框架
+用户登陆小程序获取到 code 后，通过调用微信提供的接口 https://api.weixin.qq.com/sns/jscode2session，将 code 发送到微信服务器，根据你给的APPID和APPSECRET，微信服务器会返回用户的 openid 和 session_key，服务器获取其openid，用户得以登录。<br />
+如果用户是初次登陆，后端服务器会将收取到的openid记录在数据库ai_chat的User表格里面，若不是初次登录，则不用进行登记。<br />
+用户在index页面进行与AI的问答时，问题和答案、用户的openid以及提问的时间会通过后端服务器记录在数据库ai_chat的chat_history表格里面。<br />
+用户在查看会话历史时，后端服务器负责从数据库的chat_history表格里面选取openid等于当前用户的openid的内容，在history里面进行展示。
+## 6. 编写uni-app项目
+这里我使用的是最基本的vue框架，然后进行各个文件的编写。page的login是起始页即登陆界面，用户登录
 
 
