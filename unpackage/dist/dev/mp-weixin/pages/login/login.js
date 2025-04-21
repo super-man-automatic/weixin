@@ -10,11 +10,22 @@ const _sfc_main = {
       // 是否显示问题内容
       question: "",
       // 问题内容
-      userInfo: {}
+      userInfo: {},
       // 用户信息
+      completeAnswer: "",
+      // 完整回答内容
+      dialogs: [],
+      // 对话内容
+      openid: "",
+      // 用户 openid
+      dbServerUrl: "http://localhost:5000",
+      // 数据库服务器地址
+      aiSocket: null
+      // WebSocket 实例
     };
   },
   methods: {
+    // 微信登录逻辑
     async handleWechatLogin() {
       try {
         const userInfoRes = await common_vendor.wx$1.getUserProfile({
@@ -29,45 +40,43 @@ const _sfc_main = {
           success: (res) => {
             if (res.code) {
               common_vendor.wx$1.request({
-                url: "http://172.26.97.248:5000/login",
+                url: `${this.dbServerUrl}/login`,
                 // 替换为你的后端地址
                 method: "POST",
                 data: {
                   code: res.code
                 },
                 success: (response) => {
-                  common_vendor.index.__f__("log", "at pages/login/login.vue:60", "登录成功:", response.data);
+                  common_vendor.index.__f__("log", "at pages/login/login.vue:66", "登录成功:", response.data);
                   if (response.data.openid) {
-                    common_vendor.index.__f__("log", "at pages/login/login.vue:64", "准备弹出对话框");
+                    common_vendor.wx$1.setStorageSync("openid", response.data.openid);
+                    this.openid = response.data.openid;
                     common_vendor.wx$1.showModal({
-                      title: "Login Successful",
-                      content: `${userInfo.nickName}, do you want to enter Q&A?`,
-                      confirmText: "Enter",
-                      cancelText: "History",
+                      title: "登录成功",
+                      content: `${userInfo.nickName}，请选择功能：`,
+                      confirmText: "进入问答",
+                      cancelText: "查看历史",
                       success: (res2) => {
-                        common_vendor.index.__f__("log", "at pages/login/login.vue:72", "Modal result:", res2);
                         if (res2.confirm) {
-                          common_vendor.index.__f__("log", "at pages/login/login.vue:74", "User chose to enter Q&A");
                           common_vendor.wx$1.switchTab({
                             url: "/pages/index/index",
-                            // 替换为你的 TabBar 页面路径
+                            // 替换为你的问答页面路径
                             fail: (err) => {
-                              common_vendor.index.__f__("error", "at pages/login/login.vue:79", "Failed to switch to index page:", err);
+                              common_vendor.index.__f__("error", "at pages/login/login.vue:86", "跳转到问答页面失败:", err);
                               common_vendor.wx$1.showToast({
-                                title: "Failed to navigate",
+                                title: "跳转失败",
                                 icon: "error"
                               });
                             }
                           });
                         } else if (res2.cancel) {
-                          common_vendor.index.__f__("log", "at pages/login/login.vue:87", "User chose to view history");
                           common_vendor.wx$1.switchTab({
                             url: "/pages/history/history",
-                            // 替换为你的 TabBar 页面路径
+                            // 替换为你的历史记录页面路径
                             fail: (err) => {
-                              common_vendor.index.__f__("error", "at pages/login/login.vue:92", "Failed to switch to history page:", err);
+                              common_vendor.index.__f__("error", "at pages/login/login.vue:98", "跳转到历史记录页面失败:", err);
                               common_vendor.wx$1.showToast({
-                                title: "Failed to navigate",
+                                title: "跳转失败",
                                 icon: "error"
                               });
                             }
@@ -75,7 +84,7 @@ const _sfc_main = {
                         }
                       },
                       fail: (err) => {
-                        common_vendor.index.__f__("error", "at pages/login/login.vue:102", "Failed to display modal:", err);
+                        common_vendor.index.__f__("error", "at pages/login/login.vue:108", "显示功能选择对话框失败:", err);
                       }
                     });
                   } else {
@@ -86,7 +95,7 @@ const _sfc_main = {
                   }
                 },
                 fail: (error) => {
-                  common_vendor.index.__f__("error", "at pages/login/login.vue:113", "登录失败:", error);
+                  common_vendor.index.__f__("error", "at pages/login/login.vue:119", "登录失败:", error);
                   common_vendor.wx$1.showToast({
                     title: "请求失败，请检查网络",
                     icon: "error"
@@ -94,22 +103,108 @@ const _sfc_main = {
                 }
               });
             } else {
-              common_vendor.index.__f__("error", "at pages/login/login.vue:121", "获取登录凭证失败:", res.errMsg);
+              common_vendor.index.__f__("error", "at pages/login/login.vue:127", "获取登录凭证失败:", res.errMsg);
               common_vendor.wx$1.showToast({
                 title: "登录失败，请重试",
                 icon: "error"
               });
             }
+          },
+          fail: (err) => {
+            common_vendor.index.__f__("error", "at pages/login/login.vue:135", "wx.login 调用失败:", err);
+            common_vendor.wx$1.showToast({
+              title: "登录失败，请重试",
+              icon: "error"
+            });
           }
         });
       } catch (error) {
-        common_vendor.index.__f__("error", "at pages/login/login.vue:130", "登录失败:", error);
+        common_vendor.index.__f__("error", "at pages/login/login.vue:143", "登录失败:", error);
         common_vendor.wx$1.showToast({
           title: error.errMsg || "登录失败",
           icon: "error"
         });
       } finally {
         this.isLogging = false;
+      }
+    },
+    // 保存聊天记录
+    saveChatHistory(question, answer) {
+      if (!this.openid || !question || !answer) {
+        common_vendor.index.__f__("error", "at pages/login/login.vue:156", "保存聊天记录失败：缺少 openid、问题或答案", {
+          openid: this.openid,
+          question,
+          answer
+        });
+        return;
+      }
+      common_vendor.wx$1.request({
+        url: `${this.dbServerUrl}/save_chat`,
+        method: "POST",
+        header: {
+          "Content-Type": "application/json"
+        },
+        data: {
+          openid: this.openid,
+          question,
+          answer
+        },
+        success: (res) => {
+          common_vendor.index.__f__("log", "at pages/login/login.vue:176", "聊天记录保存成功:", res.data);
+        },
+        fail: (err) => {
+          common_vendor.index.__f__("error", "at pages/login/login.vue:179", "保存聊天记录失败:", err);
+        }
+      });
+    },
+    // 初始化 WebSocket
+    async initAiWebSocket() {
+      try {
+        const authUrl = await this.getWebSocketUrl();
+        common_vendor.index.__f__("log", "at pages/login/login.vue:188", "尝试连接星火 AI WebSocket:", authUrl);
+        this.aiSocket = common_vendor.wx$1.connectSocket({
+          url: authUrl,
+          success: () => {
+            common_vendor.index.__f__("log", "at pages/login/login.vue:193", "星火 AI WebSocket 连接成功");
+          },
+          fail: (err) => {
+            common_vendor.index.__f__("error", "at pages/login/login.vue:196", "星火 AI WebSocket 连接失败:", err);
+          }
+        });
+        this.aiSocket.onOpen(() => {
+          common_vendor.index.__f__("log", "at pages/login/login.vue:202", "星火 AI WebSocket 已打开");
+        });
+        this.aiSocket.onMessage((res) => {
+          const data = JSON.parse(res.data);
+          common_vendor.index.__f__("log", "at pages/login/login.vue:208", "收到星火 AI 消息:", data);
+          if (data.payload && data.payload.choices && data.payload.choices.text) {
+            const textArray = data.payload.choices.text;
+            const lastDialog = this.dialogs[this.dialogs.length - 1];
+            if (lastDialog.role === "ai") {
+              textArray.forEach((item) => {
+                lastDialog.content += item.content;
+                this.completeAnswer += item.content;
+              });
+            }
+          }
+          if (data.header && data.header.status === 2) {
+            common_vendor.index.__f__("log", "at pages/login/login.vue:222", "回答生成完成");
+            if (this.completeAnswer.trim()) {
+              this.saveChatHistory(this.dialogs[this.dialogs.length - 2].content, this.completeAnswer);
+            } else {
+              common_vendor.index.__f__("error", "at pages/login/login.vue:226", "回答内容为空，未保存聊天记录");
+            }
+            this.aiSocket.close();
+          }
+        });
+        this.aiSocket.onError((err) => {
+          common_vendor.index.__f__("error", "at pages/login/login.vue:234", "星火 AI WebSocket 错误:", err);
+        });
+        this.aiSocket.onClose(() => {
+          common_vendor.index.__f__("log", "at pages/login/login.vue:239", "星火 AI WebSocket 已关闭");
+        });
+      } catch (err) {
+        common_vendor.index.__f__("error", "at pages/login/login.vue:242", "初始化 WebSocket 失败:", err);
       }
     }
   }

@@ -31,16 +31,22 @@ export default {
       isLogging: false, // 是否正在登录
       showQuestion: false, // 是否显示问题内容
       question: "", // 问题内容
-      userInfo: {} // 用户信息
-    }
+      userInfo: {}, // 用户信息
+      completeAnswer: "", // 完整回答内容
+      dialogs: [], // 对话内容
+      openid: "", // 用户 openid
+      dbServerUrl: "http://localhost:5000", // 数据库服务器地址
+      aiSocket: null, // WebSocket 实例
+    };
   },
   methods: {
+    // 微信登录逻辑
     async handleWechatLogin() {
       try {
         // 获取用户信息（必须在用户点击时触发）
         const userInfoRes = await wx.getUserProfile({
           desc: '用于智能问答系统的个性化服务', // 明确用途说明
-          timeout: 10000 // 设置超时时间
+          timeout: 10000, // 设置超时时间
         });
         const userInfo = userInfoRes.userInfo;
 
@@ -51,61 +57,61 @@ export default {
           success: (res) => {
             if (res.code) {
               wx.request({
-                url: 'http://172.26.97.248:5000/login', // 替换为你的后端地址
+                url: `${this.dbServerUrl}/login`, // 替换为你的后端地址
                 method: 'POST',
                 data: {
-                  code: res.code
+                  code: res.code,
                 },
                 success: (response) => {
                   console.log('登录成功:', response.data);
 
                   // 检查后端返回的数据
                   if (response.data.openid) {
-                    console.log('准备弹出对话框');
+                    // 将 openid 存储到本地
+                    wx.setStorageSync('openid', response.data.openid);
+                    this.openid = response.data.openid;
+
                     // 显示功能选择对话框
                     wx.showModal({
-                      title: 'Login Successful',
-                      content: `${userInfo.nickName}, do you want to enter Q&A?`,
-                      confirmText: 'Enter',
-                      cancelText: 'History',
+                      title: '登录成功',
+                      content: `${userInfo.nickName}，请选择功能：`,
+                      confirmText: '进入问答',
+                      cancelText: '查看历史',
                       success: (res) => {
-                        console.log('Modal result:', res); // 添加日志
                         if (res.confirm) {
-                          console.log('User chose to enter Q&A');
-                          // 使用 wx.switchTab 跳转到 TabBar 页面
+                          // 跳转到问答页面
                           wx.switchTab({
-                            url: '/pages/index/index', // 替换为你的 TabBar 页面路径
+                            url: '/pages/index/index', // 替换为你的问答页面路径
                             fail: (err) => {
-                              console.error('Failed to switch to index page:', err);
+                              console.error('跳转到问答页面失败:', err);
                               wx.showToast({
-                                title: 'Failed to navigate',
-                                icon: 'error'
+                                title: '跳转失败',
+                                icon: 'error',
                               });
-                            }
+                            },
                           });
                         } else if (res.cancel) {
-                          console.log('User chose to view history');
-                          // 使用 wx.switchTab 跳转到 TabBar 页面
+                          // 跳转到历史记录页面
                           wx.switchTab({
-                            url: '/pages/history/history', // 替换为你的 TabBar 页面路径
+                            url: '/pages/history/history', // 替换为你的历史记录页面路径
                             fail: (err) => {
-                              console.error('Failed to switch to history page:', err);
+                              console.error('跳转到历史记录页面失败:', err);
                               wx.showToast({
-                                title: 'Failed to navigate',
-                                icon: 'error'
+                                title: '跳转失败',
+                                icon: 'error',
                               });
-                            }
+                            },
                           });
                         }
                       },
                       fail: (err) => {
-                        console.error('Failed to display modal:', err); // 添加日志
-                      }
+                        console.error('显示功能选择对话框失败:', err);
+                      },
                     });
                   } else {
                     wx.showToast({
                       title: '登录失败，请重试',
-                      icon: 'error'
+                      icon: 'error',
                     });
                   }
                 },
@@ -113,31 +119,131 @@ export default {
                   console.error('登录失败:', error);
                   wx.showToast({
                     title: '请求失败，请检查网络',
-                    icon: 'error'
+                    icon: 'error',
                   });
-                }
+                },
               });
             } else {
               console.error('获取登录凭证失败:', res.errMsg);
               wx.showToast({
                 title: '登录失败，请重试',
-                icon: 'error'
+                icon: 'error',
               });
             }
-          }
+          },
+          fail: (err) => {
+            console.error('wx.login 调用失败:', err);
+            wx.showToast({
+              title: '登录失败，请重试',
+              icon: 'error',
+            });
+          },
         });
       } catch (error) {
         console.error('登录失败:', error);
         wx.showToast({
           title: error.errMsg || '登录失败',
-          icon: 'error'
+          icon: 'error',
         });
       } finally {
         this.isLogging = false;
       }
-    }
-  }
-}
+    },
+
+    // 保存聊天记录
+    saveChatHistory(question, answer) {
+      if (!this.openid || !question || !answer) {
+        console.error('保存聊天记录失败：缺少 openid、问题或答案', {
+          openid: this.openid,
+          question,
+          answer,
+        });
+        return;
+      }
+
+      wx.request({
+        url: `${this.dbServerUrl}/save_chat`,
+        method: 'POST',
+        header: {
+          'Content-Type': 'application/json',
+        },
+        data: {
+          openid: this.openid,
+          question: question,
+          answer: answer,
+        },
+        success: (res) => {
+          console.log('聊天记录保存成功:', res.data);
+        },
+        fail: (err) => {
+          console.error('保存聊天记录失败:', err);
+        },
+      });
+    },
+
+    // 初始化 WebSocket
+    async initAiWebSocket() {
+      try {
+        const authUrl = await this.getWebSocketUrl();
+        console.log('尝试连接星火 AI WebSocket:', authUrl);
+
+        this.aiSocket = wx.connectSocket({
+          url: authUrl,
+          success: () => {
+            console.log('星火 AI WebSocket 连接成功');
+          },
+          fail: (err) => {
+            console.error('星火 AI WebSocket 连接失败:', err);
+          },
+        });
+
+        // 监听 WebSocket 打开
+        this.aiSocket.onOpen(() => {
+          console.log('星火 AI WebSocket 已打开');
+        });
+
+        // 监听 WebSocket 消息
+        this.aiSocket.onMessage((res) => {
+          const data = JSON.parse(res.data);
+          console.log('收到星火 AI 消息:', data);
+
+          if (data.payload && data.payload.choices && data.payload.choices.text) {
+            const textArray = data.payload.choices.text;
+            const lastDialog = this.dialogs[this.dialogs.length - 1];
+            if (lastDialog.role === 'ai') {
+              textArray.forEach((item) => {
+                lastDialog.content += item.content;
+                this.completeAnswer += item.content;
+              });
+            }
+          }
+
+          if (data.header && data.header.status === 2) {
+            console.log('回答生成完成');
+            if (this.completeAnswer.trim()) {
+              this.saveChatHistory(this.dialogs[this.dialogs.length - 2].content, this.completeAnswer);
+            } else {
+              console.error('回答内容为空，未保存聊天记录');
+            }
+            this.aiSocket.close(); // 关闭 WebSocket 连接
+          }
+        });
+
+        // 监听 WebSocket 错误
+        this.aiSocket.onError((err) => {
+          console.error('星火 AI WebSocket 错误:', err);
+        });
+
+        // 监听 WebSocket 关闭
+        this.aiSocket.onClose(() => {
+          console.log('星火 AI WebSocket 已关闭');
+        });
+      } catch (err) {
+        console.error('初始化 WebSocket 失败:', err);
+      }
+    },
+  },
+};
 </script>
 
 <style scoped>

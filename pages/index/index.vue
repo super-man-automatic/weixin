@@ -27,167 +27,300 @@
         type="text" 
         placeholder="请输入您的问题"
         v-model="inputValue"
-        @input="onInputChange"
+        :disabled="isSending"
+        @confirm="sendQuestion"
       />
-      <button class="send-button" @tap="sendQuestion">
-        发送
+      <button 
+        class="send-button" 
+        :disabled="isSending" 
+        @tap="sendQuestion"
+      >
+        {{ isSending ? '回答中...' : '发送' }}
       </button>
     </view>
   </view>
 </template>
 
 <script>
+import CryptoJS from 'crypto-js';
+import base64 from 'base-64';
+
 export default {
   data() {
     return {
-      dialogs: [], // 对话记录
-      inputValue: '', // 输入框内容
-      apiServerUrl: 'http://localhost:11434', // API 调用服务器地址
-      dbServerUrl: 'http://172.26.97.248:5000', // 数据库写入服务器地址
-      scrollToBottomID: 'dialog-bottom', // 滚动到底部的 ID
-      openid: '', // 当前用户的 openid
-      socketOpen: false // API 连接状态
+      dialogs: [],
+      inputValue: '',
+      aiWebSocketUrl: 'wss://spark-api.xf-yun.com/v4.0/chat',
+      dbServerUrl: 'http://localhost:5000',
+      scrollToBottomID: 'dialog-bottom',
+      aiSocket: null,
+      isSending: false,
+      APPID: '5d460b66',
+      APISecret: 'MTEwOTA3MmI2MThlZWM2YjFlMjYxMzM1',
+      APIKey: '6f7d2da1a23bc29e761708ac7d53f022',
+      currentAnswer: '',
+      currentQuestion: '',
+      reconnectTimer: null,
+      responseComplete: false,
+      modelDomain: ''
     };
   },
   methods: {
-    // 输入框内容变化
-    onInputChange(e) {
-      this.inputValue = e.detail.value;
-    },
-
-    // 检查 API 连接状态
-    checkAPIConnection() {
-      wx.request({
-        url: `${this.apiServerUrl}/api/tags`, // 使用 API 调用服务器
-        method: 'GET',
-        success: () => {
-          this.socketOpen = true;
-          console.log('API连接正常');
-        },
-        fail: (err) => {
-          console.error('API连接失败:', err);
-          this.socketOpen = false;
-        }
-      });
-    },
-
-    // 发送问题
     async sendQuestion() {
-      if (!this.inputValue.trim() || !this.socketOpen) return;
-
-      // 检查 openid 是否存在
-      if (!this.openid) {
-        console.error('缺少 openid，请重新登录');
-        wx.redirectTo({ url: '/pages/login/login' }); // 如果没有 openid，跳转到登录页面
+      if (!this.inputValue.trim()) {
+        this.showToast('请输入您的问题');
         return;
       }
 
-      // 添加用户消息到对话记录
-      this.dialogs.push({
-        role: 'user',
-        content: this.inputValue
-      });
+      if (this.isSending) {
+        this.showToast('正在处理上一个问题，请稍后');
+        return;
+      }
 
-      const question = this.inputValue; // 保存用户输入
-      this.inputValue = ''; // 清空输入框
-      this.scrollToBottom(); // 滚动到底部
+      this.isSending = true;
+      this.currentQuestion = this.inputValue.trim();
+      this.inputValue = '';
+      this.currentAnswer = '';
+      this.responseComplete = false;
+
+      // 添加对话记录
+      this.dialogs.push(
+        { role: 'user', content: this.currentQuestion },
+        { role: 'ai', content: '思考中...' }
+      );
+      this.scrollToBottom();
 
       try {
-        wx.request({
-          url: `${this.apiServerUrl}/api/generate`, // 使用 API 调用服务器
-          method: 'POST',
-          header: {
-            'Content-Type': 'application/json'
-          },
-          data: {
-            prompt: question,
-            model: 'deepseek-r1:8b',
-            max_tokens: 1024,
-            temperature: 0.7,
-            top_p: 1.0,
-            stream: false
-          },
-          success: (res) => {
-            if (res.statusCode === 200 && res.data.response) {
-              // 去掉 <think></think> 字符
-              const aiResponse = res.data.response.replace(/<think>.*?<\/think>/g, '').trim();
-              this.dialogs.push({ role: 'ai', content: aiResponse });
-              this.scrollToBottom(); // 滚动到底部
-              this.saveChatHistory(question, aiResponse); // 保存聊天记录
-            } else {
-              console.error('请求失败:', res.data);
-              this.dialogs.push({ role: 'ai', content: '请求处理失败，请重试' });
-              this.scrollToBottom();
-            }
-          },
-          fail: (err) => {
-            console.error('请求失败:', err);
-            this.dialogs.push({ role: 'ai', content: '请求处理失败，请重试' });
-            this.scrollToBottom();
-          }
-        });
+        if (!this.aiSocket || this.aiSocket.readyState !== 1) {
+          await this.createConnection();
+        }
+        await this.sendToAI();
+        this.startResponseTimer(); // 确保方法存在
       } catch (err) {
-        console.error('请求失败:', err);
-        this.dialogs.push({ role: 'ai', content: '请求处理失败，请重试' });
-        this.scrollToBottom();
+        console.error('发送失败:', err);
+        this.handleSendError();
       }
     },
 
-    // 保存聊天记录
-    async saveChatHistory(question, answer) {
+    async createConnection() {
+      return new Promise((resolve, reject) => {
+        if (this.aiSocket) {
+          this.aiSocket.close({
+            success: () => {
+              console.log('WebSocket 已关闭，准备重新连接');
+              this.initializeWebSocket(resolve, reject);
+            },
+            fail: (err) => {
+              console.error('关闭 WebSocket 失败:', err);
+              reject(err);
+            }
+          });
+        } else {
+          this.initializeWebSocket(resolve, reject);
+        }
+      });
+    },
+
+    initializeWebSocket(resolve, reject) {
+      this.getWebSocketUrl()
+        .then(authUrl => {
+          console.log('尝试连接 WebSocket:', authUrl);
+
+          this.aiSocket = wx.connectSocket({
+            url: authUrl,
+            success: () => {
+              console.log('WebSocket 连接初始化成功');
+            },
+            fail: (err) => {
+              console.error('WebSocket 初始化失败:', err);
+              reject(err);
+            }
+          });
+
+          this.aiSocket.onOpen(() => {
+            console.log('WebSocket 连接成功');
+            resolve();
+          });
+
+          this.aiSocket.onMessage(res => this.handleMessage(res));
+
+          this.aiSocket.onError(err => {
+            console.error('WebSocket 连接错误:', err);
+            this.handleSendError();
+            reject(err);
+          });
+
+          this.aiSocket.onClose(() => {
+            console.log('WebSocket 已关闭');
+            this.isSending = false;
+          });
+        })
+        .catch(err => {
+          console.error('获取 WebSocket URL 失败:', err);
+          reject(err);
+        });
+    },
+
+    handleMessage(res) {
       try {
-        if (!this.openid) {
-          console.error('缺少 openid，请重新登录');
-          wx.redirectTo({ url: '/pages/login/login' }); // 如果没有 openid，跳转到登录页面
+        const obj = JSON.parse(res.data);
+        console.log('结构化消息:', obj);
+
+        if (obj.header?.code !== 0) {
+          console.error('API 返回错误:', obj.header.message);
+          this.showToast(`服务错误: ${obj.header.message}`);
+          this.handleResponseError();
           return;
         }
 
-        // 去掉 <think></think> 字符
-        const sanitizedQuestion = question.replace(/<think>.*?<\/think>/g, '').trim();
-        const sanitizedAnswer = answer.replace(/<think>.*?<\/think>/g, '').trim();
-
-        wx.request({
-          url: `${this.dbServerUrl}/save_chat`, // 使用数据库写入服务器
-          method: 'POST',
-          header: {
-            'Content-Type': 'application/json'
-          },
-          data: {
-            openid: this.openid, // 使用当前用户的 openid
-            question: sanitizedQuestion,
-            answer: sanitizedAnswer
-          },
-          success: (res) => {
-            console.log('聊天记录保存成功:', res.data);
-          },
-          fail: (err) => {
-            console.error('保存聊天记录失败:', err);
+        const content = obj.payload?.choices?.text?.[0]?.content || '';
+        if (content) {
+          this.currentAnswer += content;
+          const lastDialog = this.dialogs[this.dialogs.length - 1];
+          if (lastDialog?.role === 'ai') {
+            lastDialog.content = this.currentAnswer.replace('思考中...', '');
+            this.$forceUpdate();
+            this.scrollToBottom();
           }
-        });
-      } catch (err) {
-        console.error('保存聊天记录时发生错误:', err);
+        }
+
+        if (obj.header?.status === 2) {
+          console.log('完整回答接收完成');
+          this.responseComplete = true;
+          this.handleResponseComplete();
+        }
+      } catch (e) {
+        console.error('消息解析失败:', e);
+        this.handleResponseError();
       }
     },
 
-    // 滚动到底部
+    async sendToAI() {
+      const params = {
+        header: {
+          app_id: this.APPID,
+         
+        },
+        parameter: {
+          chat: {
+            domain: '4.0Ultra',
+            temperature: 0.5,
+            max_tokens: 1024,
+            chat_id: Date.now().toString()
+          }
+        },
+        payload: {
+          message: {
+            text: [
+              { role: 'user', content: this.currentQuestion }
+            ]
+          }
+        }
+      };
+
+      console.log('发送参数:', JSON.stringify(params, null, 2));
+
+      return new Promise((resolve, reject) => {
+        this.aiSocket.send({
+          data: JSON.stringify(params),
+          success: resolve,
+          fail: reject
+        });
+      });
+    },
+
+    getWebSocketUrl() {
+      return new Promise((resolve, reject) => {
+        try {
+          const host = 'spark-api.xf-yun.com';
+          const path = '/v4.0/chat';
+          const date = new Date().toGMTString();
+          const signatureOrigin = `host: ${host}\ndate: ${date}\nGET ${path} HTTP/1.1`;
+          const signature = CryptoJS.HmacSHA256(signatureOrigin, this.APISecret).toString(CryptoJS.enc.Base64);
+          const authorization = base64.encode(
+            `api_key="${this.APIKey}", algorithm="hmac-sha256", headers="host date request-line", signature="${signature}"`
+          );
+          const url = `${this.aiWebSocketUrl}?authorization=${authorization}&date=${encodeURIComponent(date)}&host=${host}`;
+          console.log('生成的 WebSocket URL:', url);
+          resolve(url);
+        } catch (err) {
+          console.error('生成 WebSocket URL 失败:', err);
+          reject(err);
+        }
+      });
+    },
+
+    showToast(msg) {
+      wx.showToast({
+        title: msg,
+        icon: 'none',
+        duration: 2000
+      });
+    },
+
     scrollToBottom() {
       this.$nextTick(() => {
         this.scrollToBottomID = `dialog-${this.dialogs.length - 1}`;
       });
+    },
+
+    handleSendError() {
+      this.isSending = false;
+      this.dialogs.pop(); // 移除最后一条 "思考中..." 的对话
+      this.$forceUpdate();
+      if (this.aiSocket) {
+        this.aiSocket.close();
+        this.aiSocket = null;
+      }
+      this.showToast('发送失败，请检查网络或服务配置');
+    },
+
+    startResponseTimer() {
+      // 设置超时时间为 60 秒
+      this.reconnectTimer = setTimeout(() => {
+        if (!this.responseComplete) {
+          console.warn('响应超时');
+          this.handleSendError();
+        }
+      }, 60000);
+    },
+
+    handleResponseComplete() {
+      console.log('响应处理完成');
+      this.isSending = false;
+
+      // 如果需要关闭 WebSocket，可以在这里处理
+      if (this.aiSocket) {
+        this.aiSocket.close();
+        this.aiSocket = null;
+      }
+    },
+
+    handleResponseError() {
+      console.error('处理响应时发生错误');
+      this.isSending = false;
+
+      const lastDialog = this.dialogs[this.dialogs.length - 1];
+      if (lastDialog?.role === 'ai') {
+        lastDialog.content = '抱歉，处理响应时出错，请稍后重试。';
+        this.$forceUpdate();
+        this.scrollToBottom();
+      }
+
+      // 针对鉴权错误的提示
+      if (this.currentAnswer.includes('AppIdNoAuthError')) {
+        this.showToast('鉴权失败，请检查 APPID 和密钥配置');
+      }
     }
   },
   onLoad() {
-    this.checkAPIConnection(); // 检查 API 连接状态
-
-    // 从本地存储中获取 openid
-    const openid = wx.getStorageSync('openid');
-    if (!openid) {
-      console.error('缺少 openid，请重新登录');
-      wx.redirectTo({ url: '/pages/login/login' }); // 如果没有 openid，跳转到登录页面
-    } else {
-      this.openid = openid; // 保存 openid 到组件数据中
-      console.log('当前用户 openid:', openid);
+    console.log('当前用户 APPID:', this.APPID);
+  },
+  onUnload() {
+    if (this.aiSocket) {
+      this.aiSocket.close();
     }
+    clearTimeout(this.reconnectTimer);
   }
 };
 </script>
@@ -252,5 +385,9 @@ export default {
   color: #fff;
   border: none;
   border-radius: 4px;
+}
+
+.send-button[disabled] {
+  opacity: 0.6;
 }
 </style>

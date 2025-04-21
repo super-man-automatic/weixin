@@ -3,7 +3,7 @@ import requests
 import logging
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime  # 导入 datetime 模块
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -23,9 +23,8 @@ db = SQLAlchemy(app)
 # 定义用户表
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    openid = db.Column(db.String(64), unique=True, nullable=False)  # 用户的 openid
+    openid = db.Column(db.String(64), unique=True, nullable=False)
 
-    # 明确指定 primaryjoin 条件
     chats = db.relationship(
         'ChatHistory',
         primaryjoin="User.openid == foreign(ChatHistory.openid)",
@@ -38,8 +37,8 @@ class ChatHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     question = db.Column(db.Text, nullable=False)
     answer = db.Column(db.Text, nullable=False)
-    openid = db.Column(db.String(64), nullable=False)  # 存储用户的 openid
-    timestamp = db.Column(db.DateTime, nullable=False)  # 提问时间
+    openid = db.Column(db.String(64), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False)
 
 # 初始化数据库
 with app.app_context():
@@ -47,8 +46,10 @@ with app.app_context():
 
 @app.route('/login', methods=['POST'])
 def login():
+    """
+    微信登录接口，获取 openid 和 session_key
+    """
     try:
-        # 从请求中获取 code
         data = request.json
         code = data.get('code')
 
@@ -83,7 +84,6 @@ def login():
             db.session.add(user)
             db.session.commit()
 
-        # 返回 openid 和 session_key
         return jsonify({
             "openid": openid,
             "session_key": session_key
@@ -98,11 +98,14 @@ def login():
 
 @app.route('/save_chat', methods=['POST'])
 def save_chat():
+    """
+    接收前端发送的完整聊天记录并保存到数据库
+    """
     try:
         data = request.json
         openid = data.get('openid')  # 从请求中获取 openid
-        question = data.get('question', '').replace('<think>', '').replace('</think>', '').strip()
-        answer = data.get('answer', '').replace('<think>', '').replace('</think>', '').strip()
+        question = data.get('question', '').strip()
+        answer = data.get('answer', '').strip()
 
         if not openid or not question or not answer:
             return jsonify({"error": "缺少 openid、问题或答案"}), 400
@@ -115,6 +118,7 @@ def save_chat():
         db.session.add(chat)
         db.session.commit()
 
+        logging.info(f"聊天记录保存成功: openid={openid}, question={question}, answer={answer}")
         return jsonify({"message": "聊天记录保存成功", "timestamp": timestamp.strftime('%Y-%m-%d %H:%M:%S')}), 200
 
     except Exception as e:
@@ -123,18 +127,17 @@ def save_chat():
 
 @app.route('/get_chat_history', methods=['GET'])
 def get_chat_history():
+    """
+    获取用户的聊天记录
+    """
     try:
         openid = request.args.get('openid')  # 从请求参数中获取 openid
-        page = int(request.args.get('page', 1))  # 获取当前页码，默认为 1
-        page_size = int(request.args.get('pageSize', 10))  # 获取每页记录数，默认为 10
 
         if not openid:
             return jsonify({"error": "缺少 openid"}), 400
 
-        # 获取用户的聊天记录，按时间倒序排序并分页
-        query = ChatHistory.query.filter_by(openid=openid).order_by(ChatHistory.timestamp.desc())
-        total = query.count()  # 总记录数
-        chats = query.offset((page - 1) * page_size).limit(page_size).all()
+        # 获取用户的所有聊天记录，按时间倒序排序
+        chats = ChatHistory.query.filter_by(openid=openid).order_by(ChatHistory.timestamp.desc()).all()
 
         chat_list = [
             {
@@ -147,15 +150,12 @@ def get_chat_history():
 
         return jsonify({
             "chats": chat_list,
-            "total": total,
-            "page": page,
-            "pageSize": page_size
+            "total": len(chat_list)
         }), 200
 
     except Exception as e:
         logging.error(f"Failed to get chat history: {e}")
         return jsonify({"error": str(e)}), 500
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

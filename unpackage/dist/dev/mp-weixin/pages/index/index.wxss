@@ -51,3 +51,6 @@
   border: none;
   border-radius: 4px;
 }
+.send-button[disabled].data-v-1cf27b2a {
+  opacity: 0.6;
+}
