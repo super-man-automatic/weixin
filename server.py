@@ -103,12 +103,20 @@ def save_chat():
     """
     try:
         data = request.json
+        logging.info(f"接收到的请求数据: {data}")
+
         openid = data.get('openid')  # 从请求中获取 openid
         question = data.get('question', '').strip()
         answer = data.get('answer', '').strip()
 
         if not openid or not question or not answer:
+            logging.error("缺少 openid、问题或答案")
             return jsonify({"error": "缺少 openid、问题或答案"}), 400
+
+        # 验证字段长度
+        if len(question) > 1000 or len(answer) > 5000:
+            logging.error("问题或答案内容过长")
+            return jsonify({"error": "问题或答案内容过长"}), 400
 
         # 获取当前时间
         timestamp = datetime.now()
@@ -122,7 +130,7 @@ def save_chat():
         return jsonify({"message": "聊天记录保存成功", "timestamp": timestamp.strftime('%Y-%m-%d %H:%M:%S')}), 200
 
     except Exception as e:
-        logging.error(f"Failed to save chat history: {e}")
+        logging.error(f"保存聊天记录时发生错误: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/get_chat_history', methods=['GET'])

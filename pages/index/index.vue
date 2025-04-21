@@ -20,6 +20,16 @@
       <view :id="scrollToBottomID"></view>
     </scroll-view>
 
+    <!-- 新增：预设问题按钮 -->
+    <view v-if="showPresetButton" class="preset-question">
+      <button 
+        class="preset-button" 
+        @tap="fillPresetQuestion"
+      >
+        你可以问我关于职场方面的问题，比如：在职场中如何与同事相处？
+      </button>
+    </view>
+
     <!-- 输入框和发送按钮 -->
     <view class="input-send-area">
       <input 
@@ -50,6 +60,7 @@ export default {
     return {
       dialogs: [],
       inputValue: '',
+      showPresetButton: true, // 新增：控制预设问题按钮的显示
       aiWebSocketUrl: 'wss://spark-api.xf-yun.com/v4.0/chat',
       dbServerUrl: 'http://localhost:5000',
       scrollToBottomID: 'dialog-bottom',
@@ -62,7 +73,8 @@ export default {
       currentQuestion: '',
       reconnectTimer: null,
       responseComplete: false,
-      modelDomain: ''
+      modelDomain: '',
+      openid: '', // 新增：存储用户的 openid
     };
   },
   methods: {
@@ -188,6 +200,9 @@ export default {
           console.log('完整回答接收完成');
           this.responseComplete = true;
           this.handleResponseComplete();
+
+          // 存储对话到数据库
+          this.saveChatToDatabase(this.currentQuestion, this.currentAnswer);
         }
       } catch (e) {
         console.error('消息解析失败:', e);
@@ -311,10 +326,88 @@ export default {
       if (this.currentAnswer.includes('AppIdNoAuthError')) {
         this.showToast('鉴权失败，请检查 APPID 和密钥配置');
       }
+    },
+
+    async saveChatToDatabase(question, answer) {
+      if (!this.openid) {
+        console.error('未找到 openid，无法保存聊天记录');
+        wx.showToast({
+          title: '未登录，请先登录',
+          icon: 'error',
+        });
+        return;
+      }
+
+      try {
+        const timestamp = new Date().toISOString(); // 获取当前时间戳
+        const requestData = {
+          openid: this.openid,
+          question: question,
+          answer: answer,
+          timestamp: timestamp,
+        };
+
+        console.log('准备发送到后端的请求数据:', requestData);
+
+        // 使用 Promise 包装异步请求
+        const response = await new Promise((resolve, reject) => {
+          wx.request({
+            url: `${this.dbServerUrl}/save_chat`, // 后端保存聊天记录的接口
+            method: 'POST',
+            header: {
+              'Content-Type': 'application/json',
+            },
+            data: requestData,
+            success: (res) => resolve(res),
+            fail: (err) => reject(err),
+          });
+        });
+
+        console.log('后端返回的响应:', response);
+
+        if (response.statusCode === 200 && response.data.message === '聊天记录保存成功') {
+          console.log('聊天记录保存成功:', response.data);
+          wx.showToast({
+            title: '聊天记录已保存',
+            icon: 'success',
+          });
+        } else {
+          console.error('聊天记录保存失败:', response.data);
+          wx.showToast({
+            title: '保存失败，请稍后重试',
+            icon: 'error',
+          });
+        }
+      } catch (err) {
+        console.error('保存聊天记录时发生错误:', err);
+        wx.showToast({
+          title: '保存失败，请检查网络',
+          icon: 'error',
+        });
+      }
+    },
+
+    // 新增：填充预设问题的方法
+    fillPresetQuestion() {
+      this.inputValue = "在职场中如何与同事相处？";
+      this.showPresetButton = false; // 点击后隐藏按钮
     }
   },
   onLoad() {
     console.log('当前用户 APPID:', this.APPID);
+
+    // 获取登录时存储的 openid
+    const storedOpenid = wx.getStorageSync('openid');
+    if (storedOpenid) {
+      this.openid = storedOpenid;
+      console.log('获取到的 openid:', this.openid);
+    } else {
+      console.error('未找到 openid，请先登录');
+      wx.showToast({
+        title: '请先登录',
+        icon: 'error',
+      });
+    }
   },
   onUnload() {
     if (this.aiSocket) {
@@ -389,5 +482,27 @@ export default {
 
 .send-button[disabled] {
   opacity: 0.6;
+}
+
+/* 新增：预设问题按钮样式 */
+.preset-question {
+  padding: 10px;
+  text-align: center;
+  background-color: #f9f9f9;
+  border-bottom: 1px solid #ddd;
+}
+
+.preset-button {
+  padding: 10px 15px;
+  background-color: #007aff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.preset-button:active {
+  background-color: #005bb5;
 }
 </style>
