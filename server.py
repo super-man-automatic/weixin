@@ -136,16 +136,22 @@ def save_chat():
 @app.route('/get_chat_history', methods=['GET'])
 def get_chat_history():
     """
-    获取用户的聊天记录
+    获取用户的聊天记录，支持分页
     """
     try:
         openid = request.args.get('openid')  # 从请求参数中获取 openid
+        page = int(request.args.get('page', 1))  # 当前页码，默认为 1
+        page_size = int(request.args.get('pageSize', 10))  # 每页记录数，默认为 10
 
         if not openid:
             return jsonify({"error": "缺少 openid"}), 400
 
-        # 获取用户的所有聊天记录，按时间倒序排序
-        chats = ChatHistory.query.filter_by(openid=openid).order_by(ChatHistory.timestamp.desc()).all()
+        # 获取用户的聊天记录，按时间倒序排序
+        query = ChatHistory.query.filter_by(openid=openid).order_by(ChatHistory.timestamp.desc())
+        total = query.count()  # 总记录数
+
+        # 分页
+        chats = query.offset((page - 1) * page_size).limit(page_size).all()
 
         chat_list = [
             {
@@ -158,7 +164,7 @@ def get_chat_history():
 
         return jsonify({
             "chats": chat_list,
-            "total": len(chat_list)
+            "total": total
         }), 200
 
     except Exception as e:

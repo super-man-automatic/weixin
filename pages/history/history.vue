@@ -49,7 +49,7 @@ export default {
       try {
         const res = await new Promise((resolve, reject) => {
           wx.request({
-            url: `http://172.26.97.248:5000/get_chat_history`, // 后端接口地址
+            url: `http://localhost:5000/get_chat_history`, // 后端接口地址
             method: 'GET',
             data: {
               openid: this.openid, // 当前用户的 openid
