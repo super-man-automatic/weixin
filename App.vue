@@ -6,7 +6,7 @@ export default {
     
     // 初始化全局变量
     this.globalData = {
-      apiUrl: 'https://172.26.98.86:5000', // 建议使用正式域名
+      apiUrl: 'https://localhost:5000', // 建议使用正式域名
       hasLogin: false
     };
 
