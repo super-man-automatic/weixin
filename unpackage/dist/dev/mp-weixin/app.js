@@ -10,7 +10,7 @@ const _sfc_main = {
   onLaunch: function() {
     common_vendor.index.__f__("log", "at App.vue:5", "App Launch");
     this.globalData = {
-      apiUrl: "https://172.26.98.86:5000",
+      apiUrl: "https://localhost:5000",
       // 建议使用正式域名
       hasLogin: false
     };
